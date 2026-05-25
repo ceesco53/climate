@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: climate
+  namespace: climate
+spec:
+  selector:
+    app: climate
+  ports:
+    - port: 80
+      targetPort: 8000

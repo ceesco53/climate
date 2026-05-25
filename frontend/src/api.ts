@@ -1,8 +1,17 @@
 import axios from 'axios'
-import type { AuthStatusResponse, DevicesResponse, HistoryResponse } from './types'
+import type { AuthStatus, ConfigPayload, ConfigStatus, DevicesResponse, HistoryResponse } from './types'
 
-export async function fetchAuthStatus(): Promise<AuthStatusResponse> {
-  const { data } = await axios.get<AuthStatusResponse>('/api/auth/status')
+export async function fetchConfigStatus(): Promise<ConfigStatus> {
+  const { data } = await axios.get<ConfigStatus>('/api/config/status')
+  return data
+}
+
+export async function saveConfig(payload: ConfigPayload): Promise<void> {
+  await axios.post('/api/config', payload)
+}
+
+export async function fetchAuthStatus(): Promise<AuthStatus> {
+  const { data } = await axios.get<AuthStatus>('/api/auth/status')
   return data
 }
 

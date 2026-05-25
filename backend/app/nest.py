@@ -5,81 +5,62 @@ from urllib.parse import urlencode
 
 import httpx
 
-from .database import get_config, set_config
+from . import config
 
 logger = logging.getLogger(__name__)
 
-GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
-GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
-SDM_PROJECT_ID = os.getenv("SDM_PROJECT_ID", "")
-APP_HOST = os.getenv("APP_HOST", "https://climate.ingress.realmclick.com")
-
-UPSTAIRS_DEVICE_ID = os.getenv("UPSTAIRS_DEVICE_ID", "")
-DOWNSTAIRS_DEVICE_ID = os.getenv("DOWNSTAIRS_DEVICE_ID", "")
-
-_LOCATION_MAP: dict[str, str] = {}
+# APP_HOST is a non-sensitive deployment param, read from env only.
+_APP_HOST = os.getenv("APP_HOST", "https://climate.ingress.realmclick.com")
 
 
-def _build_location_map() -> None:
-    if UPSTAIRS_DEVICE_ID:
-        _LOCATION_MAP[UPSTAIRS_DEVICE_ID] = "Upstairs"
-    if DOWNSTAIRS_DEVICE_ID:
-        _LOCATION_MAP[DOWNSTAIRS_DEVICE_ID] = "Downstairs"
-
-
-_build_location_map()
-
-
-def get_auth_url() -> str:
+async def get_auth_url() -> str:
+    client_id = await config.get("google_client_id")
+    project_id = await config.get("sdm_project_id")
     params = {
-        "redirect_uri": f"{APP_HOST}/api/auth/callback",
+        "redirect_uri": f"{_APP_HOST}/api/auth/callback",
         "access_type": "offline",
         "response_type": "code",
         "scope": "https://www.googleapis.com/auth/sdm.service",
-        "client_id": GOOGLE_CLIENT_ID,
+        "client_id": client_id,
         "prompt": "consent",
     }
-    base = f"https://nestservices.google.com/partnerconnections/{SDM_PROJECT_ID}/auth"
+    base = f"https://nestservices.google.com/partnerconnections/{project_id}/auth"
     return f"{base}?{urlencode(params)}"
 
 
-async def exchange_code(code: str) -> str:
+async def exchange_code(code: str) -> None:
+    client_id = await config.get("google_client_id")
+    client_secret = await config.get("google_client_secret")
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             "https://oauth2.googleapis.com/token",
             data={
-                "client_id": GOOGLE_CLIENT_ID,
-                "client_secret": GOOGLE_CLIENT_SECRET,
+                "client_id": client_id,
+                "client_secret": client_secret,
                 "code": code,
                 "grant_type": "authorization_code",
-                "redirect_uri": f"{APP_HOST}/api/auth/callback",
+                "redirect_uri": f"{_APP_HOST}/api/auth/callback",
             },
         )
         resp.raise_for_status()
         tokens = resp.json()
         refresh_token = tokens.get("refresh_token", "")
         if refresh_token:
-            await set_config("google_refresh_token", refresh_token)
-        return tokens.get("access_token", "")
-
-
-async def _get_refresh_token() -> str | None:
-    token = os.getenv("GOOGLE_REFRESH_TOKEN", "")
-    if token:
-        return token
-    return await get_config("google_refresh_token")
+            await config.set("google_refresh_token", refresh_token)
 
 
 async def _get_access_token() -> str:
-    refresh_token = await _get_refresh_token()
+    refresh_token = await config.get("google_refresh_token")
     if not refresh_token:
-        raise RuntimeError("No Google refresh token — visit /api/auth/start to connect")
+        raise RuntimeError("No refresh token — complete OAuth via /api/auth/start")
+    client_id = await config.get("google_client_id")
+    client_secret = await config.get("google_client_secret")
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             "https://oauth2.googleapis.com/token",
             data={
-                "client_id": GOOGLE_CLIENT_ID,
-                "client_secret": GOOGLE_CLIENT_SECRET,
+                "client_id": client_id,
+                "client_secret": client_secret,
                 "refresh_token": refresh_token,
                 "grant_type": "refresh_token",
             },
@@ -88,7 +69,7 @@ async def _get_access_token() -> str:
         return resp.json()["access_token"]
 
 
-def _parse_device(device: dict) -> dict:
+async def _parse_device(device: dict) -> dict:
     traits = device.get("traits", {})
     name: str = device["name"]
     device_id = name.split("/")[-1]
@@ -105,7 +86,14 @@ def _parse_device(device: dict) -> dict:
     mode = traits.get("sdm.devices.traits.ThermostatMode", {})
     setpoint = traits.get("sdm.devices.traits.ThermostatTemperatureSetpoint", {})
 
-    location = _LOCATION_MAP.get(device_id)
+    upstairs_id = await config.get("upstairs_device_id")
+    downstairs_id = await config.get("downstairs_device_id")
+    if device_id == upstairs_id:
+        location = "upstairs"
+    elif device_id == downstairs_id:
+        location = "downstairs"
+    else:
+        location = None
 
     return {
         "device_id": device_id,
@@ -123,9 +111,10 @@ def _parse_device(device: dict) -> dict:
 
 async def fetch_all_readings() -> list[dict]:
     access_token = await _get_access_token()
+    project_id = await config.get("sdm_project_id")
     async with httpx.AsyncClient() as client:
         resp = await client.get(
-            f"https://smartdevicemanagement.googleapis.com/v1/enterprises/{SDM_PROJECT_ID}/devices",
+            f"https://smartdevicemanagement.googleapis.com/v1/enterprises/{project_id}/devices",
             headers={"Authorization": f"Bearer {access_token}"},
             timeout=15.0,
         )
@@ -133,11 +122,18 @@ async def fetch_all_readings() -> list[dict]:
         devices = resp.json().get("devices", [])
 
     thermostats = [d for d in devices if "THERMOSTAT" in d.get("type", "")]
-    readings = [_parse_device(d) for d in thermostats]
+    readings = [await _parse_device(d) for d in thermostats]
     logger.info("Fetched %d thermostat(s)", len(readings))
     return readings
 
 
 async def is_authenticated() -> bool:
-    token = await _get_refresh_token()
-    return bool(token)
+    return await config.is_set("google_refresh_token")
+
+
+async def credentials_configured() -> bool:
+    return (
+        await config.is_set("google_client_id")
+        and await config.is_set("google_client_secret")
+        and await config.is_set("sdm_project_id")
+    )

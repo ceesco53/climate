@@ -5,11 +5,13 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
+from . import config as cfg
 from .database import init_db, insert_reading, get_history, get_latest_readings
-from .nest import fetch_all_readings, get_auth_url, exchange_code, is_authenticated
+from .nest import fetch_all_readings, get_auth_url, exchange_code, is_authenticated, credentials_configured
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -17,20 +19,17 @@ logger = logging.getLogger(__name__)
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL_SECONDS", "300"))
 
 _poll_task: asyncio.Task | None = None
-_auth_ready = False
 
 
 async def _poll_loop() -> None:
-    global _auth_ready
     while True:
         try:
-            if await is_authenticated():
-                _auth_ready = True
+            if await credentials_configured() and await is_authenticated():
                 readings = await fetch_all_readings()
                 for reading in readings:
                     await insert_reading(reading)
             else:
-                logger.warning("Not authenticated — skipping poll. Visit /api/auth/start")
+                logger.info("Config incomplete — skipping poll. Visit the dashboard to set up.")
         except Exception as exc:
             logger.error("Poll failed: %s", exc)
         await asyncio.sleep(POLL_INTERVAL)
@@ -49,14 +48,47 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Climate Dashboard", lifespan=lifespan)
 
 
+# ── Health ────────────────────────────────────────────────────────────────────
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
+# ── Config ────────────────────────────────────────────────────────────────────
+
+class ConfigPayload(BaseModel):
+    # All fields optional so the client can send only what changed.
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    sdm_project_id: str | None = None
+    upstairs_device_id: str | None = None
+    downstairs_device_id: str | None = None
+
+
+@app.get("/api/config/status")
+async def config_status():
+    """Returns which credential keys are present — never their values."""
+    return await cfg.status()
+
+
+@app.post("/api/config")
+async def save_config(payload: ConfigPayload):
+    """Persist credential values to the SQLite config store."""
+    updates = payload.model_dump(exclude_none=True)
+    for key, value in updates.items():
+        if value:
+            await cfg.set(key, value)
+    return {"ok": True, "saved": list(updates.keys())}
+
+
+# ── OAuth ─────────────────────────────────────────────────────────────────────
+
 @app.get("/api/auth/start")
 async def auth_start():
-    return RedirectResponse(url=get_auth_url())
+    if not await credentials_configured():
+        raise HTTPException(status_code=400, detail="Credentials not configured. Save them via the dashboard first.")
+    return RedirectResponse(url=await get_auth_url())
 
 
 @app.get("/api/auth/callback")
@@ -70,9 +102,13 @@ async def auth_callback(code: str = Query(...)):
 
 @app.get("/api/auth/status")
 async def auth_status():
-    authed = await is_authenticated()
-    return {"authenticated": authed}
+    return {
+        "credentials_configured": await credentials_configured(),
+        "authenticated": await is_authenticated(),
+    }
 
+
+# ── Devices & History ─────────────────────────────────────────────────────────
 
 @app.get("/api/devices")
 async def get_devices():

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { format, parseISO } from 'date-fns'
 import { fetchAuthStatus, fetchDevices } from './api'
-import type { Reading } from './types'
+import type { AuthStatus, Reading } from './types'
 import { ThermostatPanel } from './components/ThermostatPanel'
+import { SettingsModal } from './components/SettingsModal'
 
 const REFRESH_MS = 5 * 60 * 1000
 
@@ -18,19 +19,28 @@ function sortDevices(devices: Reading[]): Reading[] {
   })
 }
 
+type Stage = 'loading' | 'needs-credentials' | 'needs-auth' | 'dashboard'
+
+function stageFrom(status: AuthStatus): Stage {
+  if (!status.credentials_configured) return 'needs-credentials'
+  if (!status.authenticated) return 'needs-auth'
+  return 'dashboard'
+}
+
 export default function App() {
-  const [authenticated, setAuthenticated] = useState<boolean | null>(null)
+  const [stage, setStage] = useState<Stage>('loading')
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [devices, setDevices] = useState<Reading[]>([])
   const [updatedAt, setUpdatedAt] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const checkAuth = useCallback(async () => {
+  const checkStatus = useCallback(async () => {
     try {
-      const { authenticated } = await fetchAuthStatus()
-      setAuthenticated(authenticated)
+      const status = await fetchAuthStatus()
+      setStage(stageFrom(status))
     } catch {
-      setAuthenticated(false)
+      setStage('needs-credentials')
     }
   }, [])
 
@@ -46,119 +56,173 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    checkAuth()
-  }, [checkAuth])
+    checkStatus()
+  }, [checkStatus])
 
   useEffect(() => {
-    if (!authenticated) return
+    if (stage !== 'dashboard') {
+      if (intervalRef.current) clearInterval(intervalRef.current)
+      return
+    }
     loadDevices()
     intervalRef.current = setInterval(loadDevices, REFRESH_MS)
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current)
     }
-  }, [authenticated, loadDevices])
+  }, [stage, loadDevices])
 
-  // Setup screen
-  if (authenticated === false) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-6 px-4">
-        <div className="text-center space-y-2">
-          <h1 className="text-2xl font-bold text-slate-100">Climate Dashboard</h1>
-          <p className="text-slate-400 text-sm max-w-sm">
-            Connect your Google Nest account to start collecting thermostat data.
-          </p>
-        </div>
-        <a
-          href="/api/auth/start"
-          className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg transition-colors"
-        >
-          Connect Google Nest
-        </a>
-        <p className="text-slate-600 text-xs text-center max-w-xs">
-          You'll need a Google Nest Device Access project. After connecting, data collection
-          begins automatically every 5 minutes.
-        </p>
-      </div>
-    )
+  const handleConfigSaved = () => {
+    checkStatus()
+    if (stage === 'dashboard') loadDevices()
   }
 
-  // Loading
-  if (authenticated === null || (authenticated && devices.length === 0 && !error)) {
+  // ── Loading ────────────────────────────────────────────────────────────────
+  if (stage === 'loading') {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-slate-500 text-sm animate-pulse">Loading thermostats…</div>
+        <div className="text-slate-500 text-sm animate-pulse">Loading…</div>
       </div>
     )
   }
 
-  const lastUpdated = updatedAt
-    ? format(parseISO(updatedAt), 'MMM d, h:mm:ss a')
-    : null
+  // ── Needs credentials ──────────────────────────────────────────────────────
+  if (stage === 'needs-credentials') {
+    return (
+      <>
+        <div className="min-h-screen flex flex-col items-center justify-center gap-6 px-4 text-center">
+          <div className="space-y-1">
+            <h1 className="text-2xl font-bold text-slate-100">Climate Dashboard</h1>
+            <p className="text-slate-500 text-sm">Nest Learning Thermostat · Gen 4</p>
+          </div>
+          <p className="text-slate-400 text-sm max-w-sm">
+            Enter your Google Cloud credentials to get started. They are stored only in this app's
+            database — never in environment variables or k8s secrets.
+          </p>
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg transition-colors"
+          >
+            Open Settings
+          </button>
+        </div>
+        {settingsOpen && (
+          <SettingsModal onClose={() => setSettingsOpen(false)} onConfigSaved={handleConfigSaved} />
+        )}
+      </>
+    )
+  }
+
+  // ── Needs OAuth ────────────────────────────────────────────────────────────
+  if (stage === 'needs-auth') {
+    return (
+      <>
+        <div className="min-h-screen flex flex-col items-center justify-center gap-6 px-4 text-center">
+          <div className="space-y-1">
+            <h1 className="text-2xl font-bold text-slate-100">Climate Dashboard</h1>
+            <p className="text-slate-500 text-sm">Nest Learning Thermostat · Gen 4</p>
+          </div>
+          <p className="text-slate-400 text-sm max-w-sm">
+            Credentials saved. Now authorize access to your Nest thermostats.
+          </p>
+          <a
+            href="/api/auth/start"
+            className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg transition-colors"
+          >
+            Connect Google Nest →
+          </a>
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="text-xs text-slate-600 hover:text-slate-400 underline"
+          >
+            Edit credentials
+          </button>
+        </div>
+        {settingsOpen && (
+          <SettingsModal onClose={() => setSettingsOpen(false)} onConfigSaved={handleConfigSaved} />
+        )}
+      </>
+    )
+  }
+
+  // ── Dashboard ──────────────────────────────────────────────────────────────
+  const lastUpdated = updatedAt ? format(parseISO(updatedAt), 'MMM d, h:mm:ss a') : null
 
   return (
-    <div className="min-h-screen px-4 py-6 max-w-7xl mx-auto">
-      {/* Page header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-xl font-bold text-slate-100 tracking-tight">Climate Dashboard</h1>
-          <p className="text-xs text-slate-500 mt-0.5">Nest Learning Thermostat · Gen 4</p>
+    <>
+      <div className="min-h-screen px-4 py-6 max-w-7xl mx-auto">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-xl font-bold text-slate-100 tracking-tight">Climate Dashboard</h1>
+            <p className="text-xs text-slate-500 mt-0.5">Nest Learning Thermostat · Gen 4</p>
+          </div>
+          <div className="flex items-center gap-4">
+            {lastUpdated && <p className="text-xs text-slate-600">Updated {lastUpdated}</p>}
+            <button
+              onClick={() => setSettingsOpen(true)}
+              title="Settings"
+              className="text-slate-600 hover:text-slate-300 transition-colors text-lg"
+            >
+              ⚙
+            </button>
+          </div>
         </div>
-        {lastUpdated && (
-          <p className="text-xs text-slate-600">Updated {lastUpdated}</p>
+
+        {error && (
+          <div className="mb-4 px-4 py-3 bg-red-900/30 border border-red-800 rounded-lg text-red-300 text-sm">
+            {error}
+          </div>
         )}
+
+        {devices.length === 0 ? (
+          <div className="text-center py-16 text-slate-500 text-sm space-y-2">
+            <p>No thermostat data yet — data is collected every 5 minutes.</p>
+            <p className="text-xs">
+              If this persists, open{' '}
+              <button onClick={() => setSettingsOpen(true)} className="underline">
+                Settings
+              </button>{' '}
+              and verify your credentials and thermostat labels.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+            {devices.map((d) => (
+              <ThermostatPanel key={d.device_id} current={d} />
+            ))}
+          </div>
+        )}
+
+        <div className="mt-6 flex flex-wrap gap-4 text-xs text-slate-600 justify-center">
+          <span className="flex items-center gap-1.5">
+            <span className="w-8 border-t-2 border-slate-300 inline-block" />
+            Actual temp
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-8 border-t-2 border-dashed border-orange-400 inline-block" />
+            Heat setpoint
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-8 border-t-2 border-dashed border-sky-400 inline-block" />
+            Cool setpoint
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-4 h-3 bg-red-500/20 border border-red-500/30 inline-block rounded-sm" />
+            Heating active
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-4 h-3 bg-blue-500/20 border border-blue-500/30 inline-block rounded-sm" />
+            Cooling active
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-8 border-t-2 border-indigo-400 inline-block" />
+            Humidity
+          </span>
+        </div>
       </div>
 
-      {error && (
-        <div className="mb-4 px-4 py-3 bg-red-900/30 border border-red-800 rounded-lg text-red-300 text-sm">
-          {error}
-        </div>
+      {settingsOpen && (
+        <SettingsModal onClose={() => setSettingsOpen(false)} onConfigSaved={handleConfigSaved} />
       )}
-
-      {devices.length === 0 ? (
-        <div className="text-center py-16 text-slate-500 text-sm space-y-2">
-          <p>No thermostat data yet.</p>
-          <p className="text-xs">
-            Data is collected every 5 minutes. Check that{' '}
-            <code className="bg-surface-card px-1 rounded">UPSTAIRS_DEVICE_ID</code> and{' '}
-            <code className="bg-surface-card px-1 rounded">DOWNSTAIRS_DEVICE_ID</code> env vars
-            are set in your deployment.
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-          {devices.map((d) => (
-            <ThermostatPanel key={d.device_id} current={d} />
-          ))}
-        </div>
-      )}
-
-      {/* Legend */}
-      <div className="mt-6 flex flex-wrap gap-4 text-xs text-slate-600 justify-center">
-        <span className="flex items-center gap-1.5">
-          <span className="w-8 border-t-2 border-slate-300 inline-block" />
-          Actual temp
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-8 border-t-2 border-dashed border-orange-400 inline-block" />
-          Heat setpoint
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-8 border-t-2 border-dashed border-sky-400 inline-block" />
-          Cool setpoint
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-4 h-3 bg-red-500/20 border border-red-500/30 inline-block rounded-sm" />
-          Heating active
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-4 h-3 bg-blue-500/20 border border-blue-500/30 inline-block rounded-sm" />
-          Cooling active
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-8 border-t-2 border-indigo-400 inline-block" />
-          Humidity
-        </span>
-      </div>
-    </div>
+    </>
   )
 }

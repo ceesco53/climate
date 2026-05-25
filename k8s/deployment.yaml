@@ -34,39 +34,6 @@ spec:
               value: https://climate.ingress.realmclick.com
             - name: POLL_INTERVAL_SECONDS
               value: "300"
-            - name: GOOGLE_CLIENT_ID
-              valueFrom:
-                secretKeyRef:
-                  name: climate-secrets
-                  key: GOOGLE_CLIENT_ID
-            - name: GOOGLE_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: climate-secrets
-                  key: GOOGLE_CLIENT_SECRET
-            - name: SDM_PROJECT_ID
-              valueFrom:
-                secretKeyRef:
-                  name: climate-secrets
-                  key: SDM_PROJECT_ID
-            - name: GOOGLE_REFRESH_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: climate-secrets
-                  key: GOOGLE_REFRESH_TOKEN
-                  optional: true
-            - name: UPSTAIRS_DEVICE_ID
-              valueFrom:
-                secretKeyRef:
-                  name: climate-secrets
-                  key: UPSTAIRS_DEVICE_ID
-                  optional: true
-            - name: DOWNSTAIRS_DEVICE_ID
-              valueFrom:
-                secretKeyRef:
-                  name: climate-secrets
-                  key: DOWNSTAIRS_DEVICE_ID
-                  optional: true
           volumeMounts:
             - name: data
               mountPath: /data

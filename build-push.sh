@@ -14,16 +14,6 @@ set +o allexport
 # ── Validate required variables ───────────────────────────────────────────────
 : "${GITHUB_USER:?GITHUB_USER is not set in .env}"
 : "${GITHUB_TOKEN:?GITHUB_TOKEN is not set in .env}"
-: "${GOOGLE_CLIENT_ID:?GOOGLE_CLIENT_ID is not set in .env}"
-: "${GOOGLE_CLIENT_SECRET:?GOOGLE_CLIENT_SECRET is not set in .env}"
-: "${SDM_PROJECT_ID:?SDM_PROJECT_ID is not set in .env}"
-
-# ── Warn about optional-but-recommended variables ────────────────────────────
-for var in GOOGLE_REFRESH_TOKEN UPSTAIRS_DEVICE_ID DOWNSTAIRS_DEVICE_ID; do
-  if [[ -z "${!var:-}" ]]; then
-    echo "WARN: $var is empty — see README.md for how to obtain it."
-  fi
-done
 
 # ── Docker image ──────────────────────────────────────────────────────────────
 IMAGE="ghcr.io/${GITHUB_USER}/climate"
@@ -63,18 +53,7 @@ kubectl create secret docker-registry ghcr-secret \
   --docker-password="${GITHUB_TOKEN}" \
   --dry-run=client -o yaml | kubectl apply -n "${NAMESPACE}" -f -
 
-# ── Apply k8s app secrets from .env ──────────────────────────────────────────
-echo "→ Syncing climate app secrets..."
-kubectl create secret generic climate-secrets \
-  --from-literal=GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID}" \
-  --from-literal=GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET}" \
-  --from-literal=SDM_PROJECT_ID="${SDM_PROJECT_ID}" \
-  --from-literal=GOOGLE_REFRESH_TOKEN="${GOOGLE_REFRESH_TOKEN:-}" \
-  --from-literal=UPSTAIRS_DEVICE_ID="${UPSTAIRS_DEVICE_ID:-}" \
-  --from-literal=DOWNSTAIRS_DEVICE_ID="${DOWNSTAIRS_DEVICE_ID:-}" \
-  --dry-run=client -o yaml | kubectl apply -n "${NAMESPACE}" -f -
-
-# ── Apply remaining k8s manifests ─────────────────────────────────────────────
+# ── Apply k8s manifests ───────────────────────────────────────────────────────
 echo "→ Applying k8s manifests..."
 kubectl apply -f k8s/pvc.yaml
 kubectl apply -f k8s/deployment.yaml
@@ -90,3 +69,6 @@ kubectl rollout status deployment/climate -n "${NAMESPACE}"
 echo ""
 echo "✓ Deployed ${IMAGE}:${TAG}"
 echo "  https://climate.ingress.realmclick.com"
+echo ""
+echo "  First time? Open the dashboard and click 'Open Settings' to enter"
+echo "  your Google credentials. They are stored only in the app database."

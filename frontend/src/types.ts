@@ -22,8 +22,26 @@ export interface HistoryResponse {
   readings: Reading[]
 }
 
-export interface AuthStatusResponse {
+export interface ConfigStatus {
+  google_client_id: boolean
+  google_client_secret: boolean
+  sdm_project_id: boolean
+  google_refresh_token: boolean
+  upstairs_device_id: boolean
+  downstairs_device_id: boolean
+}
+
+export interface AuthStatus {
+  credentials_configured: boolean
   authenticated: boolean
+}
+
+export interface ConfigPayload {
+  google_client_id?: string
+  google_client_secret?: string
+  sdm_project_id?: string
+  upstairs_device_id?: string
+  downstairs_device_id?: string
 }
 
 export type RangeHours = 1 | 6 | 24 | 168 | 720

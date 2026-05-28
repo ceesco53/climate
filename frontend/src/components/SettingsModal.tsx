@@ -88,6 +88,7 @@ export function SettingsModal({ onClose, onConfigSaved }: Props) {
   const [goveeDevices, setGoveeDevices] = useState<GoveeDiscoverDevice[]>([])
   const [goveeDiscovering, setGoveeDiscovering] = useState(false)
   const [goveeLabels, setGoveeLabels] = useState<Record<string, string>>({})
+  const [goveeSelected, setGoveeSelected] = useState<Set<string>>(new Set())
   const [goveeLabelSaving, setGoveeLabelSaving] = useState(false)
   const [goveeLabelSaved, setGoveeLabelSaved] = useState(false)
   const [goveeLabelError, setGoveeLabelError] = useState<string | null>(null)
@@ -125,6 +126,15 @@ export function SettingsModal({ onClose, onConfigSaved }: Props) {
     } finally {
       setGoveeDiscovering(false)
     }
+  }
+
+  const toggleGoveeDevice = (id: string) => {
+    setGoveeSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
 
   useEffect(() => {
@@ -191,7 +201,10 @@ export function SettingsModal({ onClose, onConfigSaved }: Props) {
     setGoveeLabelError(null)
     setGoveeLabelSaved(false)
     try {
-      await saveConfig({ govee_device_labels: JSON.stringify(goveeLabels) })
+      await saveConfig({
+        govee_device_labels: JSON.stringify(goveeLabels),
+        govee_selected_devices: JSON.stringify([...goveeSelected]),
+      })
       setGoveeLabelSaved(true)
       onConfigSaved()
     } catch (e) {
@@ -398,19 +411,33 @@ export function SettingsModal({ onClose, onConfigSaved }: Props) {
                   </p>
                 ) : (
                   <>
-                    {goveeDevices.map((d) => (
-                      <div key={d.device_id} className="space-y-1">
-                        <label className="block text-xs text-slate-400">
-                          {d.device_name} <span className="text-slate-600">({d.device_id})</span>
-                        </label>
-                        <input
-                          type="text"
-                          value={goveeLabels[d.device_id] ?? d.device_name}
-                          onChange={(e) => setGoveeLabels((prev) => ({ ...prev, [d.device_id]: e.target.value }))}
-                          className="w-full bg-surface border border-surface-border rounded px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
-                        />
-                      </div>
-                    ))}
+                    <p className="text-xs text-slate-500">Check the devices to display on the dashboard.</p>
+                    {goveeDevices.map((d) => {
+                      const checked = goveeSelected.has(d.device_id)
+                      return (
+                        <div key={d.device_id} className={clsx(
+                          'flex items-center gap-3 p-2 rounded-lg border transition-colors',
+                          checked ? 'border-indigo-600/50 bg-indigo-900/10' : 'border-surface-border'
+                        )}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleGoveeDevice(d.device_id)}
+                            className="w-4 h-4 accent-indigo-500 cursor-pointer flex-shrink-0"
+                          />
+                          <div className="flex-1 min-w-0 space-y-1">
+                            <p className="text-xs text-slate-500 truncate">{d.device_id} · {d.sku}</p>
+                            <input
+                              type="text"
+                              value={goveeLabels[d.device_id] ?? d.device_name}
+                              onChange={(e) => setGoveeLabels((prev) => ({ ...prev, [d.device_id]: e.target.value }))}
+                              placeholder="Display name"
+                              className="w-full bg-surface border border-surface-border rounded px-2 py-1 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                            />
+                          </div>
+                        </div>
+                      )
+                    })}
                     {goveeLabelError && <p className="text-xs text-red-400">{goveeLabelError}</p>}
                     {goveeLabelSaved && <p className="text-xs text-emerald-400">Labels saved.</p>}
                     <button

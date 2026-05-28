@@ -74,7 +74,8 @@ export interface ConfigPayload {
   upstairs_device_id?: string
   downstairs_device_id?: string
   govee_api_key?: string
-  govee_device_labels?: string  // JSON string
+  govee_device_labels?: string    // JSON string
+  govee_selected_devices?: string // JSON string
 }
 
 export type RangeHours = 1 | 6 | 24 | 168 | 720

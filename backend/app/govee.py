@@ -55,10 +55,26 @@ def _extract_cap(state_resp: dict, instance: str):
     return None
 
 
+async def _selected_device_ids() -> set[str] | None:
+    """Returns the set of selected device IDs, or None if not configured (poll all)."""
+    raw = await config.get("govee_selected_devices", "")
+    if not raw:
+        return None
+    try:
+        ids = json.loads(raw)
+        return set(ids) if ids else set()
+    except Exception:
+        return None
+
+
 async def fetch_all_readings() -> list[dict]:
     api_key = await _api_key()
     labels = await _device_labels()
+    selected = await _selected_device_ids()
     devices = await list_devices_raw()
+
+    if selected is not None:
+        devices = [d for d in devices if d.get("device") in selected]
 
     readings: list[dict] = []
     async with httpx.AsyncClient() as client:

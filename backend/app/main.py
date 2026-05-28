@@ -76,7 +76,8 @@ class ConfigPayload(BaseModel):
     upstairs_device_id: str | None = None
     downstairs_device_id: str | None = None
     govee_api_key: str | None = None
-    govee_device_labels: str | None = None  # JSON: {"device_id": "label"}
+    govee_device_labels: str | None = None    # JSON: {"device_id": "label"}
+    govee_selected_devices: str | None = None # JSON: ["device_id", ...]
 
 
 @app.get("/api/config/status")
@@ -145,7 +146,15 @@ async def get_device_history(
 
 @app.get("/api/govee/devices")
 async def get_govee_devices():
+    import json as _json
     rows = await get_latest_govee_readings()
+    selected_raw = await cfg.get("govee_selected_devices", "")
+    if selected_raw:
+        try:
+            selected = set(_json.loads(selected_raw))
+            rows = [r for r in rows if r["device_id"] in selected]
+        except Exception:
+            pass
     return {"devices": rows, "timestamp": datetime.now(timezone.utc).isoformat()}
 
 

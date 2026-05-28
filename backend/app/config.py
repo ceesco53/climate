@@ -26,7 +26,8 @@ CREDENTIAL_KEYS = [
     "upstairs_device_id",
     "downstairs_device_id",
     "govee_api_key",
-    "govee_device_labels",  # JSON: {"device_id": "location label"}
+    "govee_device_labels",    # JSON: {"device_id": "location label"}
+    "govee_selected_devices", # JSON: ["device_id", ...]
 ]
 
 

@@ -99,7 +99,9 @@ async def fetch_all_readings() -> list[dict]:
                 continue
 
             state = resp.json()
-            temp = _extract_cap(state, "sensorTemperature")
+            temp_f = _extract_cap(state, "sensorTemperature")
+            # Govee API returns sensorTemperature in °F; convert to °C for storage
+            temp = (temp_f - 32) * 5 / 9 if temp_f is not None else None
             humidity = _extract_cap(state, "sensorHumidity")
             battery = _extract_cap(state, "sensorBattery")
             online_raw = _extract_cap(state, "online")

@@ -29,6 +29,8 @@ export interface ConfigStatus {
   google_refresh_token: boolean
   upstairs_device_id: boolean
   downstairs_device_id: boolean
+  govee_api_key: boolean
+  govee_device_labels: boolean
 }
 
 export interface AuthStatus {

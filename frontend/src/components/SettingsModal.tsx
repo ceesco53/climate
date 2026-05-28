@@ -356,7 +356,6 @@ export function SettingsModal({ onClose, onConfigSaved }: Props) {
               </>
             )}
           </section>
-        </div>
 
           {/* ── Section 4: Govee Hygrometers ──────────────────────────── */}
           <section className="space-y-3">

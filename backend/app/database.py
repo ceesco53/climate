@@ -31,6 +31,24 @@ async def init_db() -> None:
                 value TEXT NOT NULL
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS govee_readings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_id TEXT NOT NULL,
+                device_name TEXT NOT NULL,
+                sku TEXT,
+                location TEXT,
+                timestamp TEXT NOT NULL,
+                temperature_c REAL,
+                humidity REAL,
+                battery INTEGER,
+                online INTEGER
+            )
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_govee_device_timestamp
+            ON govee_readings(device_id, timestamp)
+        """)
         await db.commit()
 
 
@@ -79,6 +97,59 @@ async def get_history(device_id: str, hours: int) -> list[dict]:
             ORDER BY timestamp ASC
             """,
             (device_id, f"-{hours}"),
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def insert_govee_reading(reading: dict) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO govee_readings
+                (device_id, device_name, sku, location, timestamp,
+                 temperature_c, humidity, battery, online)
+            VALUES
+                (:device_id, :device_name, :sku, :location, :timestamp,
+                 :temperature_c, :humidity, :battery, :online)
+            """,
+            reading,
+        )
+        await db.commit()
+
+
+async def get_govee_history(device_id: str, hours: int) -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            """
+            SELECT device_id, device_name, sku, location, timestamp,
+                   temperature_c, humidity, battery, online
+            FROM govee_readings
+            WHERE device_id = ?
+              AND timestamp >= datetime('now', ? || ' hours')
+            ORDER BY timestamp ASC
+            """,
+            (device_id, f"-{hours}"),
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def get_latest_govee_readings() -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            """
+            SELECT r.device_id, r.device_name, r.sku, r.location, r.timestamp,
+                   r.temperature_c, r.humidity, r.battery, r.online
+            FROM govee_readings r
+            INNER JOIN (
+                SELECT device_id, MAX(timestamp) AS max_ts
+                FROM govee_readings
+                GROUP BY device_id
+            ) latest ON r.device_id = latest.device_id AND r.timestamp = latest.max_ts
+            """
         )
         rows = await cur.fetchall()
         return [dict(r) for r in rows]

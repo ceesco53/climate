@@ -1,5 +1,9 @@
 import axios from 'axios'
-import type { AuthStatus, ConfigPayload, ConfigStatus, DevicesResponse, HistoryResponse } from './types'
+import type {
+  AuthStatus, ConfigPayload, ConfigStatus,
+  DevicesResponse, HistoryResponse,
+  GoveeDevicesResponse, GoveeHistoryResponse, GoveeDiscoverDevice,
+} from './types'
 
 export async function fetchConfigStatus(): Promise<ConfigStatus> {
   const { data } = await axios.get<ConfigStatus>('/api/config/status')
@@ -25,4 +29,21 @@ export async function fetchHistory(deviceId: string, hours: number): Promise<His
     params: { device_id: deviceId, hours },
   })
   return data
+}
+
+export async function fetchGoveeDevices(): Promise<GoveeDevicesResponse> {
+  const { data } = await axios.get<GoveeDevicesResponse>('/api/govee/devices')
+  return data
+}
+
+export async function fetchGoveeHistory(deviceId: string, hours: number): Promise<GoveeHistoryResponse> {
+  const { data } = await axios.get<GoveeHistoryResponse>('/api/govee/history', {
+    params: { device_id: deviceId, hours },
+  })
+  return data
+}
+
+export async function discoverGoveeDevices(): Promise<GoveeDiscoverDevice[]> {
+  const { data } = await axios.get<{ devices: GoveeDiscoverDevice[] }>('/api/govee/discover')
+  return data.devices
 }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
-import { fetchConfigStatus, fetchDevices, saveConfig } from '../api'
-import type { ConfigStatus, Reading } from '../types'
+import { discoverGoveeDevices, fetchConfigStatus, fetchDevices, saveConfig } from '../api'
+import type { ConfigStatus, GoveeDiscoverDevice, Reading } from '../types'
 
 interface Props {
   onClose: () => void
@@ -80,6 +80,18 @@ export function SettingsModal({ onClose, onConfigSaved }: Props) {
   const [deviceError, setDeviceError] = useState<string | null>(null)
   const [deviceSaved, setDeviceSaved] = useState(false)
 
+  // Govee form
+  const [goveeKey, setGoveeKey] = useState('')
+  const [goveeKeySaving, setGoveeKeySaving] = useState(false)
+  const [goveeKeyError, setGoveeKeyError] = useState<string | null>(null)
+  const [goveeKeysaved, setGoveeKeysSaved] = useState(false)
+  const [goveeDevices, setGoveeDevices] = useState<GoveeDiscoverDevice[]>([])
+  const [goveeDiscovering, setGoveeDiscovering] = useState(false)
+  const [goveeLabels, setGoveeLabels] = useState<Record<string, string>>({})
+  const [goveeLabelSaving, setGoveeLabelSaving] = useState(false)
+  const [goveeLabelSaved, setGoveeLabelSaved] = useState(false)
+  const [goveeLabelError, setGoveeLabelError] = useState<string | null>(null)
+
   const overlayRef = useRef<HTMLDivElement>(null)
 
   const reload = async () => {
@@ -90,6 +102,28 @@ export function SettingsModal({ onClose, onConfigSaved }: Props) {
       setDevices(res.devices)
     } catch {
       // Not authenticated yet — ignore
+    }
+    if (status.govee_api_key) {
+      handleGoveeDiscover()
+    }
+  }
+
+  const handleGoveeDiscover = async () => {
+    setGoveeDiscovering(true)
+    try {
+      const found = await discoverGoveeDevices()
+      setGoveeDevices(found)
+      setGoveeLabels((prev) => {
+        const next = { ...prev }
+        for (const d of found) {
+          if (!next[d.device_id]) next[d.device_id] = d.device_name
+        }
+        return next
+      })
+    } catch {
+      // ignore
+    } finally {
+      setGoveeDiscovering(false)
     }
   }
 
@@ -133,6 +167,37 @@ export function SettingsModal({ onClose, onConfigSaved }: Props) {
       setDeviceError(e instanceof Error ? e.message : 'Save failed')
     } finally {
       setDeviceSaving(false)
+    }
+  }
+
+  const handleGoveeKeySave = async () => {
+    setGoveeKeySaving(true)
+    setGoveeKeyError(null)
+    setGoveeKeysSaved(false)
+    try {
+      await saveConfig({ govee_api_key: goveeKey.trim() })
+      setGoveeKeysSaved(true)
+      setGoveeKey('')
+      await reload()
+    } catch (e) {
+      setGoveeKeyError(e instanceof Error ? e.message : 'Save failed')
+    } finally {
+      setGoveeKeySaving(false)
+    }
+  }
+
+  const handleGoveeLabelSave = async () => {
+    setGoveeLabelSaving(true)
+    setGoveeLabelError(null)
+    setGoveeLabelSaved(false)
+    try {
+      await saveConfig({ govee_device_labels: JSON.stringify(goveeLabels) })
+      setGoveeLabelSaved(true)
+      onConfigSaved()
+    } catch (e) {
+      setGoveeLabelError(e instanceof Error ? e.message : 'Save failed')
+    } finally {
+      setGoveeLabelSaving(false)
     }
   }
 
@@ -289,6 +354,76 @@ export function SettingsModal({ onClose, onConfigSaved }: Props) {
                   {deviceSaving ? 'Saving…' : 'Save labels'}
                 </button>
               </>
+            )}
+          </section>
+        </div>
+
+          {/* ── Section 4: Govee Hygrometers ──────────────────────────── */}
+          <section className="space-y-3">
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-slate-300">Govee Hygrometers</h3>
+              {configStatus && <StatusDot on={configStatus.govee_api_key} />}
+            </div>
+            <Field
+              label="Govee API Key"
+              value={goveeKey}
+              onChange={setGoveeKey}
+              type="password"
+              placeholder={configStatus?.govee_api_key ? '(already set — enter to replace)' : 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'}
+            />
+            {goveeKeyError && <p className="text-xs text-red-400">{goveeKeyError}</p>}
+            {goveeKeysaved && <p className="text-xs text-emerald-400">Saved.</p>}
+            <button
+              onClick={handleGoveeKeySave}
+              disabled={goveeKeySaving || !goveeKey.trim()}
+              className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-sm font-medium rounded transition-colors"
+            >
+              {goveeKeySaving ? 'Saving…' : 'Save API key'}
+            </button>
+
+            {configStatus?.govee_api_key && (
+              <div className="space-y-3 pt-1">
+                <div className="flex items-center gap-3">
+                  <p className="text-xs text-slate-400">Device labels</p>
+                  <button
+                    onClick={handleGoveeDiscover}
+                    disabled={goveeDiscovering}
+                    className="text-xs text-indigo-400 hover:text-indigo-300 disabled:opacity-50"
+                  >
+                    {goveeDiscovering ? 'Discovering…' : '↻ Refresh devices'}
+                  </button>
+                </div>
+                {goveeDevices.length === 0 ? (
+                  <p className="text-xs text-slate-500">
+                    No devices found — check your API key or try refreshing.
+                  </p>
+                ) : (
+                  <>
+                    {goveeDevices.map((d) => (
+                      <div key={d.device_id} className="space-y-1">
+                        <label className="block text-xs text-slate-400">
+                          {d.device_name} <span className="text-slate-600">({d.device_id})</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={goveeLabels[d.device_id] ?? d.device_name}
+                          onChange={(e) => setGoveeLabels((prev) => ({ ...prev, [d.device_id]: e.target.value }))}
+                          className="w-full bg-surface border border-surface-border rounded px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                    ))}
+                    {goveeLabelError && <p className="text-xs text-red-400">{goveeLabelError}</p>}
+                    {goveeLabelSaved && <p className="text-xs text-emerald-400">Labels saved.</p>}
+                    <button
+                      onClick={handleGoveeLabelSave}
+                      disabled={goveeLabelSaving}
+                      className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-sm font-medium rounded transition-colors"
+                    >
+                      {goveeLabelSaving ? 'Saving…' : 'Save labels'}
+                    </button>
+                  </>
+                )}
+              </div>
             )}
           </section>
         </div>

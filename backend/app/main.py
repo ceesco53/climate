@@ -10,8 +10,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import config as cfg
-from .database import init_db, insert_reading, get_history, get_latest_readings
+from .database import (
+    init_db, insert_reading, get_history, get_latest_readings,
+    insert_govee_reading, get_govee_history, get_latest_govee_readings,
+)
 from .nest import fetch_all_readings, get_auth_url, exchange_code, is_authenticated, credentials_configured
+from .govee import fetch_all_readings as govee_fetch, is_configured as govee_configured, list_devices_raw
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -29,7 +33,14 @@ async def _poll_loop() -> None:
                 for reading in readings:
                     await insert_reading(reading)
             else:
-                logger.info("Config incomplete — skipping poll. Visit the dashboard to set up.")
+                logger.info("Nest config incomplete — skipping Nest poll.")
+
+            if await govee_configured():
+                govee_readings = await govee_fetch()
+                for reading in govee_readings:
+                    await insert_govee_reading(reading)
+            else:
+                logger.info("Govee not configured — skipping Govee poll.")
         except Exception as exc:
             logger.error("Poll failed: %s", exc)
         await asyncio.sleep(POLL_INTERVAL)
@@ -64,6 +75,8 @@ class ConfigPayload(BaseModel):
     sdm_project_id: str | None = None
     upstairs_device_id: str | None = None
     downstairs_device_id: str | None = None
+    govee_api_key: str | None = None
+    govee_device_labels: str | None = None  # JSON: {"device_id": "label"}
 
 
 @app.get("/api/config/status")
@@ -126,6 +139,40 @@ async def get_device_history(
 ):
     rows = await get_history(device_id, hours)
     return {"device_id": device_id, "hours": hours, "readings": rows}
+
+
+# ── Govee ─────────────────────────────────────────────────────────────────────
+
+@app.get("/api/govee/devices")
+async def get_govee_devices():
+    rows = await get_latest_govee_readings()
+    return {"devices": rows, "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/api/govee/history")
+async def get_govee_device_history(
+    device_id: str = Query(...),
+    hours: int = Query(default=24, ge=1, le=720),
+):
+    rows = await get_govee_history(device_id, hours)
+    return {"device_id": device_id, "hours": hours, "readings": rows}
+
+
+@app.get("/api/govee/discover")
+async def govee_discover():
+    """Call Govee API live — used during setup to verify key and list devices."""
+    if not await govee_configured():
+        return {"devices": []}
+    try:
+        raw = await list_devices_raw()
+        return {
+            "devices": [
+                {"device_id": d.get("device"), "device_name": d.get("deviceName"), "sku": d.get("sku")}
+                for d in raw
+            ]
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
 
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { format, parseISO } from 'date-fns'
-import { fetchAuthStatus, fetchDevices } from './api'
-import type { AuthStatus, Reading } from './types'
+import { fetchAuthStatus, fetchDevices, fetchGoveeDevices } from './api'
+import type { AuthStatus, GoveeReading, Reading } from './types'
 import { ThermostatPanel } from './components/ThermostatPanel'
+import { GoveePanel } from './components/GoveePanel'
 import { SettingsModal } from './components/SettingsModal'
 
 const REFRESH_MS = 5 * 60 * 1000
@@ -31,6 +32,7 @@ export default function App() {
   const [stage, setStage] = useState<Stage>('loading')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [devices, setDevices] = useState<Reading[]>([])
+  const [goveeDevices, setGoveeDevices] = useState<GoveeReading[]>([])
   const [updatedAt, setUpdatedAt] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -46,9 +48,10 @@ export default function App() {
 
   const loadDevices = useCallback(async () => {
     try {
-      const res = await fetchDevices()
-      setDevices(sortDevices(res.devices))
-      setUpdatedAt(res.timestamp)
+      const [nest, govee] = await Promise.all([fetchDevices(), fetchGoveeDevices()])
+      setDevices(sortDevices(nest.devices))
+      setGoveeDevices(govee.devices)
+      setUpdatedAt(nest.timestamp)
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load devices')
@@ -173,22 +176,39 @@ export default function App() {
           </div>
         )}
 
-        {devices.length === 0 ? (
+        {devices.length === 0 && goveeDevices.length === 0 ? (
           <div className="text-center py-16 text-slate-500 text-sm space-y-2">
-            <p>No thermostat data yet — data is collected every 5 minutes.</p>
+            <p>No data yet — readings are collected every 5 minutes.</p>
             <p className="text-xs">
               If this persists, open{' '}
               <button onClick={() => setSettingsOpen(true)} className="underline">
                 Settings
               </button>{' '}
-              and verify your credentials and thermostat labels.
+              and verify your credentials.
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-            {devices.map((d) => (
-              <ThermostatPanel key={d.device_id} current={d} />
-            ))}
+          <div className="space-y-8">
+            {devices.length > 0 && (
+              <section>
+                <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-3">Thermostats</h2>
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+                  {devices.map((d) => (
+                    <ThermostatPanel key={d.device_id} current={d} />
+                  ))}
+                </div>
+              </section>
+            )}
+            {goveeDevices.length > 0 && (
+              <section>
+                <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-3">Hygrometers</h2>
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+                  {goveeDevices.map((d) => (
+                    <GoveePanel key={d.device_id} current={d} />
+                  ))}
+                </div>
+              </section>
+            )}
           </div>
         )}
 

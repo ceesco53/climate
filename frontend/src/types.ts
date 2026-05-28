@@ -36,12 +36,43 @@ export interface AuthStatus {
   authenticated: boolean
 }
 
+export interface GoveeReading {
+  device_id: string
+  device_name: string
+  sku: string | null
+  location: string | null
+  timestamp: string
+  temperature_c: number | null
+  humidity: number | null
+  battery: number | null
+  online: number | null  // 1 = online, 0 = offline
+}
+
+export interface GoveeDevicesResponse {
+  devices: GoveeReading[]
+  timestamp: string
+}
+
+export interface GoveeHistoryResponse {
+  device_id: string
+  hours: number
+  readings: GoveeReading[]
+}
+
+export interface GoveeDiscoverDevice {
+  device_id: string
+  device_name: string
+  sku: string
+}
+
 export interface ConfigPayload {
   google_client_id?: string
   google_client_secret?: string
   sdm_project_id?: string
   upstairs_device_id?: string
   downstairs_device_id?: string
+  govee_api_key?: string
+  govee_device_labels?: string  // JSON string
 }
 
 export type RangeHours = 1 | 6 | 24 | 168 | 720

@@ -25,6 +25,8 @@ CREDENTIAL_KEYS = [
     "google_refresh_token",
     "upstairs_device_id",
     "downstairs_device_id",
+    "govee_api_key",
+    "govee_device_labels",  # JSON: {"device_id": "location label"}
 ]
 
 

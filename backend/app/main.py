@@ -41,8 +41,8 @@ async def _poll_loop() -> None:
                     await insert_govee_reading(reading)
             else:
                 logger.info("Govee not configured — skipping Govee poll.")
-        except Exception as exc:
-            logger.error("Poll failed: %s", exc)
+        except Exception:
+            logger.exception("Poll failed")
         await asyncio.sleep(POLL_INTERVAL)
 
 
